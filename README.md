@@ -175,6 +175,23 @@ python start.py both
 
 ---
 
+## 📸 Screenshots
+
+### 🔍 Find All Files
+The assistant retrieves and ranks all accessible Drive files conversationally.
+
+<img width="950" height="836" alt="Find All Files" src="https://github.com/user-attachments/assets/3d614c33-893a-45c1-9323-452c5a803779" />
+
+---
+
+### 🎯 Search Specific Files
+Users can search for particular files using natural language queries.
+
+<img width="702" height="383" alt="Search Specific Files" src="https://github.com/user-attachments/assets/60082a7a-7e24-4ccf-8ff8-8690e506677f" />
+
+
+
+
 ## 🛡️ Production Engineering Highlights
 
 ### Deterministic Orchestration
