@@ -73,6 +73,7 @@ MIME_LABELS: dict[str, str] = {
     "application/vnd.google-apps.spreadsheet": "Google Sheet",
     "application/vnd.google-apps.presentation": "Google Slide",
     "application/vnd.google-apps.form": "Google Form",
+    "application/vnd.google-apps.folder": "Folder",
 }
 
 
