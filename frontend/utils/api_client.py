@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import httpx
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 TIMEOUT = 30.0
 
 

@@ -23,8 +23,8 @@ class ResponseFormatter:
 
     def __init__(self):
         self._llm = ChatGroq(
-            api_key=settings.groq_api_key.get_secret_value(),
-            model_name="llama3-70b-8192",
+            api_key=settings.groq_api_key,
+            model_name=settings.llm_model,
             temperature=0.3
         )
         self._prompt = ChatPromptTemplate.from_messages([

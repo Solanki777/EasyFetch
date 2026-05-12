@@ -54,6 +54,9 @@ app.add_middleware(
 
 @app.middleware("http")
 async def request_tracing_middleware(request: Request, call_next):
+    # High-visibility print to bypass any logging issues
+    print(f"\n>>> Incoming Request: {request.method} {request.url.path}", flush=True)
+
     request_id = str(uuid.uuid4())[:8]
     start = time.perf_counter()
     request.state.request_id = request_id

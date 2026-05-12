@@ -33,19 +33,21 @@ class _JSONFormatter(logging.Formatter):
 
 def setup_logging(level: int = logging.INFO) -> None:
     """
-    Configure the root logger with JSON output to stdout.
+    Configure the root logger with JSON output to stderr.
     Call once at app startup (backend/main.py).
     """
-    handler = logging.StreamHandler(sys.stdout)
+    # Use stderr as it's often less buffered than stdout on Windows
+    handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(_JSONFormatter())
 
     root = logging.getLogger()
     root.setLevel(level)
 
-    # Remove any default handlers (e.g. uvicorn's)
-    root.handlers.clear()
-    root.addHandler(handler)
+    # Instead of clearing all handlers (which might break uvicorn's own logging),
+    # we just ensure our handler is present.
+    if not any(isinstance(h, logging.StreamHandler) and h.stream == sys.stderr for h in root.handlers):
+        root.addHandler(handler)
 
     # Silence noisy third-party loggers
-    for name in ("googleapiclient.discovery_cache", "urllib3.connectionpool"):
+    for name in ("googleapiclient.discovery_cache", "urllib3.connectionpool", "openai", "httpx"):
         logging.getLogger(name).setLevel(logging.WARNING)

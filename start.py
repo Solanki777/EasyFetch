@@ -15,22 +15,26 @@ import os
 
 def run_backend():
     print("Starting FastAPI backend on http://localhost:8000 ...")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.getcwd()
     subprocess.run([
         sys.executable, "-m", "uvicorn",
         "backend.main:app",
         "--reload",
         "--host", "0.0.0.0",
         "--port", "8000",
-    ])
+    ], env=env)
 
 
 def run_frontend():
     print("Starting Streamlit frontend on http://localhost:8501 ...")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.getcwd()
     subprocess.run([
         sys.executable, "-m", "streamlit", "run",
         "frontend/app.py",
         "--server.port", "8501",
-    ])
+    ], env=env)
 
 
 def run_tests():

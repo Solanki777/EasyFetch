@@ -1,196 +1,214 @@
-# 📁 Drive Assistant — Conversational AI Google Drive Search
+# 📁 Tailortalk
 
-A **production-style** AI assistant that lets you search and discover Google Drive files through natural language conversation. Built with FastAPI, LangGraph, Pydantic v2, Groq LLM, and Streamlit.
+### *Next-Generation Conversational Intelligence for Google Drive Retrieval*
 
----
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.111.0-05998b.svg)](https://fastapi.tiangolo.com/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-1.35.0-ff4b4b.svg)](https://streamlit.io/)
+[![LangGraph](https://img.shields.io/badge/LangGraph-Orchestration-orange.svg)](https://github.com/langchain-ai/langgraph)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## ✨ Features
-
-- 🔍 **Natural language file search** — "find my Q3 reports from last month"
-- 🔄 **Conversational follow-up refinement** — "only PDFs", "newest ones", "from this week"
-- 📂 **Folder awareness** — search within specific folders
-- 🧠 **Active filter memory** — filters persist across conversation turns
-- 📊 **Scored result ranking** — explainable relevance scores
-- 🔁 **Deduplication** — removes exact and near-duplicate results
-- 🗂️ **Smart grouping** — groups similar files by folder and name similarity
-- ❓ **Clarification handling** — asks follow-up questions for vague queries
-- 🏗️ **Deterministic query builder** — LLM never generates raw Drive queries
-- 📝 **Structured JSON intent extraction** — validated Pydantic v2 schemas
-- 🔒 **Service Account auth** — no OAuth flow required
+Tailortalk is a production-grade AI-powered assistant designed to bridge the gap between human language and structured cloud storage. By leveraging **LangGraph** for deterministic orchestration and **Groq** for high-speed LLM inference, Tailortalk transforms Google Drive from a static file repository into a conversational discovery engine.
 
 ---
 
-## 🏗️ Architecture
+## 🚀 Project Overview
 
+### The Problem
+Traditional file search relies on exact keyword matching and rigid folder hierarchies. Users often struggle to find documents unless they remember the precise filename or location, leading to significant productivity loss in large-scale corporate environments.
+
+### The Solution
+Tailortalk introduces **Conversational Retrieval**. It allows users to query their Google Drive using natural, ambiguous language. The system extracts intent, maintains conversational memory, and executes deterministic search queries, providing a human-centric layer over the Google Drive API.
+
+---
+
+## ✨ Key Features
+
+- **🔍 Semantic Intent Extraction**: Precisely identifies filters (MIME types, dates, owners, folders) from natural language using Pydantic v2 validation.
+- **🧠 Conversational Memory**: State-aware architecture that allows for iterative refinement (e.g., *"Show my PDFs"* followed by *"Only the ones from last week"*).
+- **📊 Intelligent Ranking Engine**: A 100-point scoring algorithm that ranks results based on name similarity, recency, and ownership.
+- **🔁 Deduplication & Grouping**: Advanced post-processing pipeline that collapses exact duplicates and groups visually similar results.
+- **❓ Proactive Clarification**: Gracefully handles vague or broad queries by requesting specific missing parameters.
+- **🔒 Deterministic Query Building**: Unlike "Black Box" AI, Tailortalk uses a deterministic builder—ensuring the LLM never generates raw API queries directly.
+
+---
+
+## 🏗️ System Architecture
+
+Tailortalk follows a decoupled architecture, separating the LLM-powered intelligence layer from the deterministic business logic.
+
+### Request Lifecycle & Orchestration
+The core logic is orchestrated via a **LangGraph State Machine**, ensuring a predictable and traceable execution path:
+
+```mermaid
+graph TD
+    User([User Message]) --> API[FastAPI Entrypoint]
+    API --> Graph{LangGraph Orchestrator}
+    
+    subgraph "AI Intelligence Layer"
+        Graph --> Intent[Intent Extraction Node]
+        Intent --> Groq1((Groq LLM))
+    end
+    
+    subgraph "Deterministic Logic Layer"
+        Intent --> Query[Query Builder]
+        Query --> Drive[Google Drive API]
+        Drive --> Processing[Post-Processing Node]
+        Processing --> Dedup[Deduplication]
+        Processing --> Ranking[Ranking Engine]
+    end
+    
+    subgraph "Response Generation"
+        Ranking --> Formatter[Response Formatter Node]
+        Formatter --> Groq2((Groq LLM))
+    end
+    
+    Formatter --> UI[Streamlit UI / Result Cards]
 ```
-User Query (Streamlit)
-        │
-        ▼
-  FastAPI Backend
-        │
-        ├─► Session Manager (in-memory / Redis)
-        │
-        ├─► Intent Extraction (LLM → SearchIntent Pydantic model)
-        │
-        ├─► Query Builder (deterministic Python → Drive q string)
-        │
-        ├─► Drive Client (Google Drive API files.list())
-        │
-        ├─► Post-Processing Pipeline
-        │     ├─ Deduplication
-        │     ├─ Ranking (scored 0–100)
-        │     └─ Grouping (by folder / name similarity)
-        │
-        └─► Response Formatter (LLM → conversational reply)
-```
-
-**Key principle:** The LLM only handles language (intent extraction + response formatting). All Drive query logic is pure deterministic Python.
 
 ---
 
-## 🚀 Quick Start
+## 🛠️ Tech Stack
 
-### 1. Clone & Install
+| Component | Technology | Role |
+| :--- | :--- | :--- |
+| **Backend** | FastAPI | High-performance asynchronous API |
+| **Orchestration** | LangGraph | State-managed agentic workflow |
+| **LLM Inference** | Groq (Llama 3) | High-speed structured extraction |
+| **Validation** | Pydantic v2 | Type safety and data integrity |
+| **Frontend** | Streamlit | Modern, interactive user interface |
+| **Cloud API** | Google Drive v3 | Metadata and file discovery |
+| **Environment** | Python 3.10+ | Core language runtime |
 
+---
+
+## 📂 Folder Structure
+
+```text
+Tailortalk/
+├── backend/
+│   ├── agent/                 # LangGraph workflow, nodes, and state schemas
+│   ├── api/                   # FastAPI routing and lifecycle events
+│   ├── schemas/               # Structured Pydantic v2 models (Intent, Drive, Session)
+│   ├── services/              # Business logic (Query Builder, Ranker, Dedup Engine)
+│   ├── session/               # State management (Follow-up merging logic)
+│   └── utils/                 # MIME mapping, logging, and date helpers
+├── frontend/
+│   ├── components/            # Modular UI (Chat Interface, Result Cards)
+│   ├── state/                 # Streamlit session state orchestration
+│   ├── utils/                 # API communication and visual icons
+│   └── app.py                 # Streamlit application entrypoint
+├── tests/                     # Unit and integration test suite
+├── .env                       # Environment configuration
+├── start.py                   # Unified system launcher
+└── requirements.txt           # Dependency management
+```
+
+---
+
+## 🚀 Installation & Setup
+
+### 1. Repository Setup
 ```bash
-git clone <repo>
-cd drive_assistant
+git clone https://github.com/Solanki777/EasyFetch.git
+cd Tailortalk
+```
+
+### 2. Virtual Environment
+```bash
+python -m venv venv
+source venv/bin/activate  # Windows: .\venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 2. Set Up Credentials
-
+### 3. Google Drive Authentication
+Tailortalk uses **Application Default Credentials (ADC)**. Run the following command and follow the browser prompts:
 ```bash
-cp .env.example .env
-# Edit .env — add your GROQ_API_KEY and Google service account path
-mkdir credentials
-# Place your Google service account JSON at credentials/service_account.json
+gcloud auth application-default login
 ```
+*Ensure the Drive API is enabled in your Google Cloud Project console.*
 
-### 3. Google Drive Service Account Setup
+### 4. Configuration
+The system requires a `.env` file in the root directory to store sensitive API keys.
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a project → Enable **Google Drive API**
-3. Create a **Service Account** → Download JSON key
-4. Save to `credentials/service_account.json`
-5. **Share your Drive folder** with the service account email
+1.  **Create the file:**
+    ```bash
+    touch .env  # Or create a new file named .env in the root folder
+    ```
+2.  **Add your Groq API Key:**
+    Visit [Groq Cloud Console](https://console.groq.com/keys) to generate a key.
+    ```env
+    GROQ_API_KEY=gsk_your_actual_key_here
+    LLM_MODEL=llama3-8b-8192
+    BACKEND_URL=http://localhost:8000
+    ```
 
-### 4. Run Locally
+> [!IMPORTANT]
+> **Tailortalk will not start without a valid `GROQ_API_KEY`.** This key powers the intent extraction and response formatting layers.
 
-**Terminal 1 — Backend:**
+### 5. Launch the System
+Tailortalk includes a unified startup script to launch both services:
 ```bash
-uvicorn backend.main:app --reload --port 8000
-```
-
-**Terminal 2 — Frontend:**
-```bash
-streamlit run frontend/app.py
-```
-
-Open [http://localhost:8501](http://localhost:8501)
-
-### 5. Or with Docker
-
-```bash
-docker-compose up --build
+python start.py both
 ```
 
 ---
 
-## 📁 Project Structure
+## 📡 API Reference
 
-```
-drive_assistant/
-├── backend/
-│   ├── main.py                    # FastAPI app entrypoint
-│   ├── config.py                  # Settings (pydantic-settings)
-│   ├── dependencies.py            # FastAPI DI
-│   ├── api/routes/                # chat, session, health endpoints
-│   ├── schemas/                   # intent, drive, session, api schemas
-│   ├── services/                  # intent_extractor, query_builder, drive_client,
-│   │                              #   ranking, deduplication, grouping, formatter
-│   ├── agent/                     # LangGraph workflow (graph, nodes, state)
-│   ├── session/                   # SessionManager (in-memory + Redis)
-│   └── utils/                     # mime_types, date_utils, text_utils, logging
-├── frontend/
-│   ├── app.py                     # Streamlit entrypoint
-│   ├── components/                # chat_interface, result_card, active_filters
-│   ├── state/                     # st.session_state management
-│   └── utils/                     # api_client, mime_icons
-├── tests/
-│   ├── unit/                      # query_builder, ranking, dedup, followup_merge
-│   └── fixtures/                  # sample intents + drive results
-├── docs/
-│   ├── architecture.md
-│   └── api_reference.md
-├── .env.example
-├── requirements.txt
-├── Dockerfile
-└── docker-compose.yml
-```
+| Endpoint | Method | Description |
+| :--- | :--- | :--- |
+| `/api/v1/chat` | `POST` | Primary conversational search endpoint |
+| `/api/v1/session/{id}` | `GET` | Retrieve session history and active filters |
+| `/health` | `GET` | System health and version status |
+| `/docs` | `GET` | Interactive Swagger/OpenAPI documentation |
 
 ---
 
-## 🧪 Running Tests
+## 💬 Example Queries
 
-```bash
-pytest tests/ -v
-```
-
----
-
-## 📡 API Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/v1/chat` | Main conversational search endpoint |
-| `GET` | `/api/v1/session/{id}` | Get session state |
-| `DELETE` | `/api/v1/session/{id}` | Clear session |
-| `GET` | `/health` | Health check |
+- **Discovery**: *"Find my project proposals from this year."*
+- **Filtering**: *"Show only PDFs."*
+- **Follow-up**: *"Now only the ones shared by Mahesh."*
+- **Navigation**: *"Open the second result."*
+- **Broad Search**: *"List all files in the 'Finance' folder."*
 
 ---
 
-## 🔧 Configuration
+## 🛡️ Production Engineering Highlights
 
-All settings via `.env` file. Key options:
+### Deterministic Orchestration
+Unlike traditional agents that "loop" indefinitely, Tailortalk uses a **Directed Acyclic Graph (DAG)**. This ensures that every request follows a validated, predictable path from intent to result, critical for enterprise reliability.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LLM_PROVIDER` | `groq` | `groq`, `gemini`, or `openai` |
-| `LLM_MODEL` | `llama3-8b-8192` | Model name for your provider |
-| `GROQ_API_KEY` | — | Your Groq API key |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | `credentials/service_account.json` | Path to service account |
-| `SESSION_TTL_SECONDS` | `3600` | Session expiry (1 hour) |
-| `REDIS_URL` | — | Optional Redis for scalable sessions |
+### Separation of Intelligence and Execution
+We treat the LLM as a **Translation Layer**, not an Execution Layer. The LLM translates natural language into a validated `SearchIntent` object. All interactions with the Google Drive API are then handled by deterministic Python code.
+
+### Typed Data Integrity
+The entire pipeline is built on **Pydantic v2**. This ensures that every piece of data—from the user's intent to the Drive file metadata—is validated against strict schemas before being processed.
 
 ---
 
-## 💬 Example Conversation
+## 🔧 Troubleshooting
 
-```
-User:  "find my project proposal"
-Bot:   "Found 3 files named 'project proposal'. Newest is 'Project Proposal v3.docx' in Work folder."
-
-User:  "only PDFs"
-Bot:   "Filtered to PDFs — 1 PDF version found."
-
-User:  "from this year"
-Bot:   "Narrowed to PDFs from this year. 1 result remains."
-
-User:  "open the first one"
-Bot:   "Opening 'Project Proposal Final.pdf'..."
-```
+| Issue | Potential Cause | Solution |
+| :--- | :--- | :--- |
+| `ModuleNotFoundError` | Path resolution error | Run with `python start.py` or set `PYTHONPATH=.` |
+| `401 Unauthorized` | Invalid Google Credentials | Re-run `gcloud auth application-default login` |
+| `Groq API Error` | Missing/Expired API Key | Check `.env` for `GROQ_API_KEY` |
+| `Backend Unreachable` | Backend process not running | Ensure `python start.py backend` is active |
 
 ---
 
-## 🚢 Deployment
+## 🗺️ Future Roadmap
 
-- **Backend**: [Railway](https://railway.app) or [Render](https://render.com) — deploy the Dockerfile
-- **Frontend**: [Streamlit Cloud](https://streamlit.io/cloud) — point to `frontend/app.py`
-- Set `BACKEND_URL` env var in the frontend to point to your deployed backend URL
+- [ ] **Vector Search (RAG)**: Implement semantic search within document content using embeddings.
+- [ ] **OCR Integration**: Enable searching inside images and scanned PDFs.
+- [ ] **Redis Backend**: Persistent, scalable session management for production clusters.
+- [ ] **Streaming Responses**: Token-by-token conversational UI for lower perceived latency.
+- [ ] **Multi-Cloud Support**: Expand discovery to OneDrive and Dropbox.
 
 ---
 
 ## 📄 License
 
-MIT
+Distributed under the MIT License. See `LICENSE` for more information.

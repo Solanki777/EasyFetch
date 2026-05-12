@@ -19,5 +19,5 @@ tests/unit/test_ranking.py PASSED
 
 ## Next Steps for USER
 1. Add your `GROQ_API_KEY` to the `.env` file.
-2. Place your `service_account.json` in the `credentials/` folder.
+2. Run `gcloud auth application-default login` to authenticate.
 3. Run `python start.py both` to launch.
