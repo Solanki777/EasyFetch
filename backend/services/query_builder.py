@@ -9,6 +9,7 @@ from typing import List, Optional
 
 from dateutil.relativedelta import relativedelta
 
+from backend.config import settings
 from backend.schemas.drive import DriveSearchParams
 from backend.schemas.intent import SearchIntent, SortSpec
 from backend.utils.mime_types import EXTENSION_TO_MIME
@@ -26,15 +27,36 @@ class QueryBuilder:
         "stuff", "get", "me", "all", "everything", "any", "the", "a", "an"
     }
 
-    def build(self, intent: SearchIntent) -> DriveSearchParams:
+    def build(self, intent: SearchIntent, allowed_folder_ids: Optional[List[str]] = None) -> DriveSearchParams:
         """
         Builds a Google Drive search query from intent.
         """
         clauses = []
 
-        # 1. Folder filter
+        # 1. Folder restriction (MANDATORY ROOT/RECURSIVE RESTRICTION)
+        if allowed_folder_ids:
+            # Construct OR clause for all allowed parents
+            parent_parts = [f"'{fid}' in parents" for fid in allowed_folder_ids]
+            if len(parent_parts) > 1:
+                clauses.append(f"({' or '.join(parent_parts)})")
+            else:
+                clauses.append(parent_parts[0])
+            logger.debug(f"Applied recursive restriction for {len(allowed_folder_ids)} folders")
+        elif settings.google_drive_root_folder_id:
+            # Fallback to single root if no subfolders discovered
+            clauses.append(f"'{settings.google_drive_root_folder_id}' in parents")
+            logger.debug(f"Applied root-only restriction: {settings.google_drive_root_folder_id}")
+
+        # 1.1 Intent-specific Folder filter (Only if within allowed hierarchy)
         if intent.folder_id:
-            clauses.append(f"'{intent.folder_id}' in parents")
+            # If we have a list of allowed folders, ensure the requested one is in it
+            if allowed_folder_ids and intent.folder_id not in allowed_folder_ids:
+                logger.warning(f"Requested folder {intent.folder_id} is outside allowed root. Overriding.")
+            else:
+                # If it's a specific subfolder, searching in it is more restrictive than the OR clause
+                # but we keep both for safety or just use the subfolder. 
+                # Actually, if we use BOTH, it's redundant but correct.
+                clauses.append(f"'{intent.folder_id}' in parents")
 
         # 2. MIME type filters (Multi-MIME Support)
         mimes = set(intent.mime_types)
@@ -83,6 +105,7 @@ class QueryBuilder:
 
         # Logging for observability
         logger.info(f"Generated Drive Query: [ {q} ]")
+        logger.debug(f"Recursive Restriction Active: {bool(allowed_folder_ids)}")
         if intent.sort:
             logger.info(f"Sort: {intent.sort.field} {intent.sort.direction}")
 

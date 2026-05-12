@@ -98,7 +98,15 @@ async def check_clarify(state: AgentState) -> AgentState:
 # ── Node: build_and_search ────────────────────────────────────────────────────
 
 async def build_and_search(state: AgentState) -> AgentState:
-    params = _query_builder.build(state["intent"])
+    from backend.config import settings
+    
+    allowed_ids = None
+    if settings.google_drive_root_folder_id:
+        allowed_ids = await _drive_client.get_recursive_folder_ids(
+            settings.google_drive_root_folder_id
+        )
+
+    params = _query_builder.build(state["intent"], allowed_folder_ids=allowed_ids)
     results = await _drive_client.search(params)
     state["raw_drive_results"] = results
     return state
