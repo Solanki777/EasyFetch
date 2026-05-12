@@ -175,20 +175,55 @@ python start.py both
 
 ---
 
+
 ## 📸 Screenshots
 
 ### 🔍 Find All Files
-The assistant retrieves and ranks all accessible Drive files conversationally.
+The assistant retrieves and ranks all accessible Google Drive files conversationally.
 
 <img width="950" height="836" alt="Find All Files" src="https://github.com/user-attachments/assets/3d614c33-893a-45c1-9323-452c5a803779" />
 
 ---
 
 ### 🎯 Search Specific Files
-Users can search for particular files using natural language queries.
+Users can search for specific files using natural language queries.
 
 <img width="702" height="383" alt="Search Specific Files" src="https://github.com/user-attachments/assets/60082a7a-7e24-4ccf-8ff8-8690e506677f" />
 
+---
+
+### 📄 Filter PDF Files
+The assistant intelligently filters and returns only PDF documents.
+
+<img width="683" height="730" alt="Show Only PDFs" src="https://github.com/user-attachments/assets/bc8f6b05-c386-4c83-b89b-f0ec76d87495" />
+
+---
+
+### 🖼️ Filter Image Files
+Supports image-based filtering for PNG, JPG, and other image formats.
+
+<img width="614" height="677" alt="Show Only Images" src="https://github.com/user-attachments/assets/536fbe43-5de1-4053-baee-41a46142052a" />
+
+---
+
+### 📂 Browse Folders
+Retrieve only Google Drive folders conversationally.
+
+<img width="603" height="718" alt="Show Folders" src="https://github.com/user-attachments/assets/7eccc906-4512-4d04-8d01-26982aa10b6d" />
+
+---
+
+### 📊 Spreadsheet Discovery
+Find spreadsheets and tabular documents using natural language queries.
+
+<img width="582" height="722" alt="Find Spreadsheets" src="https://github.com/user-attachments/assets/bea60509-2eae-459b-8ed3-2bc49e1f9441" />
+
+---
+
+### 🕒 Recent Upload Discovery
+Search files dynamically based on upload and modification recency.
+
+<img width="638" height="713" alt="Recent Upload Search" src="https://github.com/user-attachments/assets/6b382fed-5d18-494f-8988-3013fbde5591" />
 
 
 
