@@ -5,7 +5,9 @@ from backend.schemas.intent import SearchIntent, DateFilter, SortSpec
 
 
 @pytest.fixture
-def builder():
+def builder(mocker):
+    # Ensure root folder is empty for base tests
+    mocker.patch("backend.services.query_builder.settings.google_drive_root_folder_id", "")
     return QueryBuilder()
 
 

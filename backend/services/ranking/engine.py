@@ -1,10 +1,11 @@
 """
-100-point relevance ranking engine.
+Intelligent 100-point relevance ranking engine with fuzzy matching.
 """
 from __future__ import annotations
 
 import math
 import logging
+import difflib
 from datetime import datetime, timezone
 from typing import List
 
@@ -17,13 +18,10 @@ logger = logging.getLogger(__name__)
 class RankingService:
     """
     Scoring components:
-    - Name match (35)
+    - Name match (Exact: 60, Partial: 30, Fuzzy: up to 20)
     - Recency (25)
-    - Position signal (15)
-    - Type match (10)
-    - Content signal (5)
-    - Ownership bonus (5)
-    - Completeness (5)
+    - MIME relevance (10)
+    - Ownership (5)
     """
 
     def rank(self, files: List[DriveFile], intent: SearchIntent) -> List[DriveFile]:
@@ -32,57 +30,57 @@ class RankingService:
         return scored
 
     def _compute_score(self, f: DriveFile, intent: SearchIntent, position: int) -> DriveFile:
-        name_score = self._score_name(f, intent)
-        recency_score = self._score_recency(f)
-        pos_score = self._score_position(position)
-        type_score = self._score_type(f, intent)
-        owner_score = self._score_ownership(f)
-        comp_score = self._score_completeness(f)
-
-        total = name_score + recency_score + pos_score + type_score + owner_score + comp_score
-        f.relevance_score = round(min(total, 100.0), 2)
-        
-        # Populate match reasons
         reasons = []
-        if name_score >= 20: reasons.append("strong name match")
-        elif name_score > 5: reasons.append("partial name match")
-        if recency_score >= 15: reasons.append("recently modified")
-        if type_score >= 10: reasons.append("exact type match")
-        if owner_score >= 5: reasons.append("your file")
         
-        f.match_reason = reasons
-        return f
-
-    def _score_name(self, f: DriveFile, intent: SearchIntent) -> float:
+        # 1. Filename Scoring
+        name_score = 0.0
+        fuzzy_score = 0.0
+        
         query = intent.filename_query
-        if not query: return 0.0
-        name, q = f.name.lower(), query.lower()
-        if name == q: return 35.0
-        if name.startswith(q): return 29.0
-        if q in name: return 21.0
-        return 0.0
+        if query:
+            name_lower = (f.name or "").lower()
+            query_lower = query.lower()
+            
+            # Exact Match
+            if name_lower == query_lower:
+                name_score = 60.0
+                reasons.append("exact name match")
+            # Partial Match
+            elif query_lower in name_lower:
+                name_score = 30.0
+                reasons.append("partial name match")
+            # Fuzzy Similarity
+            else:
+                fuzzy_ratio = difflib.SequenceMatcher(None, query_lower, name_lower).ratio()
+                if fuzzy_ratio > 0.6:
+                    fuzzy_score = fuzzy_ratio * 20.0
+                    reasons.append(f"fuzzy match ({int(fuzzy_ratio*100)}%)")
 
-    def _score_recency(self, f: DriveFile) -> float:
-        if not f.modified_time: return 0.0
-        age_days = max((datetime.now(timezone.utc) - f.modified_time).days, 0)
-        decay = math.exp(-age_days / 43.3)  # 30-day half-life
-        return 25.0 * decay
+        # 2. MIME/Type relevance
+        type_score = 0.0
+        if f.mime_type in intent.mime_types:
+            type_score = 10.0
+            reasons.append("exact type match")
+        elif any(ext in (f.name or "").lower() for ext in intent.file_extensions):
+            type_score = 8.0
+            reasons.append("extension match")
 
-    def _score_position(self, position: int) -> float:
-        return 15.0 * math.exp(-position / 15.0)
+        # 3. Recency (30-day half-life)
+        recency_score = 0.0
+        if f.modified_time:
+            age_days = max((datetime.now(timezone.utc) - f.modified_time).days, 0)
+            decay = math.exp(-age_days / 43.3)
+            recency_score = 25.0 * decay
+            if recency_score > 15:
+                reasons.append("recently modified")
 
-    def _score_type(self, f: DriveFile, intent: SearchIntent) -> float:
-        if f.mime_type in intent.mime_types: return 10.0
-        ext = f.name.split('.')[-1].lower() if '.' in f.name else ''
-        if ext in intent.file_extensions: return 8.0
-        return 0.0
+        # 4. Ownership
+        owner_score = 5.0 if f.owned_by_me else 0.0
+        if owner_score > 0:
+            reasons.append("your file")
 
-    def _score_ownership(self, f: DriveFile) -> float:
-        return 5.0 if f.owned_by_me else 0.0
-
-    def _score_completeness(self, f: DriveFile) -> float:
-        score = 0.0
-        if f.web_view_link: score += 2.0
-        if f.size_bytes: score += 2.0
-        if f.parent_folder_name: score += 1.0
-        return score
+        total = name_score + fuzzy_score + type_score + recency_score + owner_score
+        f.relevance_score = round(min(total, 100.0), 2)
+        f.match_reason = reasons
+        
+        return f

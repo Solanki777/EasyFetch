@@ -1,197 +1,236 @@
 """
-LangGraph node functions — each node is a pure async function.
-
-Nodes:
-  extract_intent    → LLM extracts SearchIntent from user message
-  check_clarify     → returns early with clarification prompt
-  resolve_folder    → folder_name → folder_id lookup
-  build_and_search  → QueryBuilder + DriveClient
-  post_process      → dedup + rank + group
-  format_response   → LLM generates conversational reply
-  handle_open_file  → returns file URL for "open file" actions
-  handle_error      → graceful fallback reply
+LangGraph agent nodes — upgraded for universal discovery and observability.
 """
 from __future__ import annotations
 
 import logging
+import json
+import time
+from typing import Any, Dict, List, Optional
 
 from backend.agent.state import AgentState
-from backend.services.deduplication import DeduplicationService
 from backend.services.drive_client import DriveClient
-from backend.services.grouping import GroupingService
 from backend.services.intent_extractor import IntentExtractor
 from backend.services.query_builder import QueryBuilder
-from backend.services.ranking import RankingService
+from backend.services.ranking.engine import RankingService
 from backend.services.response_formatter import ResponseFormatter
 from backend.session.followup_merger import merge_followup
+from backend.utils.logging_config import log_divider
+from backend.config import settings
 
 logger = logging.getLogger(__name__)
 
-# ── Service singletons (instantiated once per process) ────────────────────────
-_intent_extractor = IntentExtractor()
-_query_builder = QueryBuilder()
-_drive_client = DriveClient()
-_ranking = RankingService()
-_dedup = DeduplicationService()
-_grouping = GroupingService()
-_formatter = ResponseFormatter()
+# Singletons (initialized on first use)
+_intent_extractor = None
+_query_builder = None
+_drive_client = None
+_ranking_service = None
+_response_formatter = None
 
 
-# ── Node: extract_intent ──────────────────────────────────────────────────────
-
-async def extract_intent(state: AgentState) -> AgentState:
-    intent = await _intent_extractor.extract(
-        user_message=state["user_message"],
-        session=state["session"],
-    )
-
-    if intent is None:
-        state["error"] = "intent_extraction_failed"
-        return state
-
-    # Merge with active session filters if this is a follow-up
-    if intent.is_followup and state["session"].active_filters:
-        intent = merge_followup(
-            base=state["session"].active_filters,
-            update=intent,
-        )
-
-    # Resolve folder name → ID (cache-first)
-    if intent.folder_name and not intent.folder_id:
-        cache = state["session"].folder_cache
-        if intent.folder_name in cache:
-            intent.folder_id = cache[intent.folder_name]
-        else:
-            folder_id = await _drive_client.get_folder_id(intent.folder_name)
-            if folder_id:
-                intent.folder_id = folder_id
-                state["session"].folder_cache[intent.folder_name] = folder_id
-
-    state["intent"] = intent
-    return state
+def _get_services():
+    global _intent_extractor, _query_builder, _drive_client, _ranking_service, _response_formatter
+    if not _intent_extractor:
+        _intent_extractor = IntentExtractor()
+        _query_builder = QueryBuilder()
+        _drive_client = DriveClient()
+        _ranking_service = RankingService()
+        _response_formatter = ResponseFormatter()
+    return _intent_extractor, _query_builder, _drive_client, _ranking_service, _response_formatter
 
 
-# ── Router ────────────────────────────────────────────────────────────────────
+# ── Routing Functions ────────────────────────────────────────────────────────
 
 def route_after_intent(state: AgentState) -> str:
-    if state.get("error"):
-        return "error"
+    """Determine where to go after intent extraction."""
     intent = state.get("intent")
-    if intent is None:
+    if not intent:
         return "error"
-    if intent.needs_clarification:
+    
+    if intent.ambiguity and intent.ambiguity.needs_clarification:
         return "clarify"
-    if intent.followup_action == "open_file":
+        
+    if intent.followup and intent.followup.action == "open_file":
         return "open_file"
+        
     return "search"
 
 
-# ── Node: check_clarify ───────────────────────────────────────────────────────
+# ── Nodes ───────────────────────────────────────────────────────────────────
+
+async def extract_intent(state: AgentState) -> AgentState:
+    """Node: Extract search intent from NL."""
+    start_time = time.time()
+    state["start_time"] = start_time
+    extractor, _, _, _, _ = _get_services()
+    
+    logger.info("\n" + "="*40)
+    logger.info("NEW USER SEARCH")
+    logger.info("="*40)
+    logger.info(f"User Query: {state['user_message']}")
+
+    intent = await extractor.extract(state["user_message"], state["session"])
+    
+    # Handle follow-up logic
+    if intent and intent.followup.is_followup and state["session"] and state["session"].last_intent:
+        logger.info("Follow-up detected. Merging with previous intent.")
+        intent = merge_followup(state["session"].last_intent, intent)
+
+    state["intent"] = intent
+    state["extraction_latency"] = time.time() - start_time
+    
+    if intent:
+        logger.info(f"Normalized Query: {intent.filename_query if intent.filename_query else 'N/A'}")
+        logger.info(f"Extracted Intent JSON: {json.dumps(intent.model_dump(), indent=2)}")
+    
+    return state
+
 
 async def check_clarify(state: AgentState) -> AgentState:
-    state["clarification_needed"] = True
-    state["clarification_prompt"] = state["intent"].clarification_question
-    state["results"] = []
+    """Node: Handle cases where the query is too vague."""
+    intent = state["intent"]
+    state["reply"] = intent.ambiguity.clarification_question or "Could you please provide more details?"
     return state
 
-
-# ── Node: build_and_search ────────────────────────────────────────────────────
 
 async def build_and_search(state: AgentState) -> AgentState:
-    from backend.config import settings
+    """Node: Build query, search Drive with FALLBACK logic."""
+    start_time = time.time()
+    _, builder, drive, _, _ = _get_services()
+    intent = state["intent"]
     
-    allowed_ids = None
-    if settings.google_drive_root_folder_id:
-        allowed_ids = await _drive_client.get_recursive_folder_ids(
-            settings.google_drive_root_folder_id
-        )
+    if not intent:
+        return state
 
-    params = _query_builder.build(state["intent"], allowed_folder_ids=allowed_ids)
-    results = await _drive_client.search(params)
+    # 1. Resolve recursive folder context
+    target_root = intent.folder_id or settings.google_drive_root_folder_id
+    
+    allowed_ids = []
+    if target_root:
+        allowed_ids = await drive.get_recursive_folder_ids(target_root)
+        
+    state["recursive_folder_count"] = len(allowed_ids)
+    
+    # 2. Fallback Search Loop
+    modes = ["strict", "broad", "contains"]
+    results = []
+    final_mode = "none"
+    
+    for mode in modes:
+        logger.info(f"Attempting search mode: {mode}")
+        params = builder.build(intent, allowed_folder_ids=allowed_ids, mode=mode)
+        
+        logger.info(f"Generated Drive Query: [ {params.q} ]")
+        
+        batch = await drive.search(params)
+        if batch:
+            results = batch
+            final_mode = mode
+            logger.info(f"Found {len(results)} files in {mode} mode.")
+            break
+        else:
+            logger.info(f"Zero results in {mode} mode. Falling back...")
+
     state["raw_drive_results"] = results
+    state["search_mode"] = final_mode
+    state["search_latency"] = time.time() - start_time
+    
+    logger.info(f"Drive API Returned: {len(results)} files")
+    if results:
+        logger.info(f"Raw Returned Files: {', '.join([f.name for f in results[:10]])}")
+
     return state
 
-
-# ── Node: post_process ────────────────────────────────────────────────────────
 
 async def post_process(state: AgentState) -> AgentState:
+    """Node: Rank results with fuzzy matching."""
+    start_time = time.time()
+    _, _, _, ranker, _ = _get_services()
+    
     files = state.get("raw_drive_results") or []
-    files = _dedup.deduplicate(files)
-    files = _ranking.rank(files, state["intent"])
+    intent = state["intent"]
 
-    # Limit to requested result count
-    limit = state["intent"].result_limit or 10
-    files = files[:limit]
+    if files and intent:
+        logger.info("\n" + "="*40)
+        logger.info("FUZZY MATCH SCORES")
+        logger.info("="*40)
+        
+        ranked = ranker.rank(files, intent)
+        
+        for f in ranked[:10]:
+            logger.info(f"  {f.name:40} -> {f.relevance_score:5.1f}")
+            
+        logger.info("\nRANKING DECISIONS:")
+        for f in ranked[:5]:
+            logger.info(f"  - {f.name}: {', '.join(f.match_reason)}")
+            
+        state["ranked_results"] = ranked
+        state["results"] = ranked # Backward compatibility
+    else:
+        state["ranked_results"] = []
+        state["results"] = []
 
-    groups = _grouping.group(files)
-    state["ranked_results"] = files
-    state["grouped_results"] = {k: [f.id for f in v] for k, v in groups.items()}
+    state["ranking_latency"] = time.time() - start_time
     return state
 
-
-# ── Node: handle_open_file ────────────────────────────────────────────────────
 
 async def handle_open_file(state: AgentState) -> AgentState:
+    """Node: Handle the 'open file' intent."""
     intent = state["intent"]
-    idx = intent.open_file_index
-    file = state["session"].get_file_by_index(idx) if idx else None
-    if file:
-        state["open_file"] = file.model_dump()
-        state["reply"] = f"Opening **{file.name}** — click the link below."
-        state["results"] = [file.model_dump()]
+    index = intent.followup.open_file_index or 1
+    
+    # Get last results from session
+    last_results = state["session"].last_results if state["session"] else []
+    
+    if last_results and 0 < index <= len(last_results):
+        target = last_results[index - 1]
+        state["open_file"] = target
+        state["reply"] = f"Opening **{target.name}** for you."
     else:
-        state["reply"] = (
-            f"I couldn't find file #{idx} in the previous results. "
-            "Please run a search first or specify a different number."
-        )
-        state["results"] = []
+        state["reply"] = f"I couldn't find file #{index} in our previous results."
+        
     return state
 
-
-# ── Node: format_response ─────────────────────────────────────────────────────
 
 async def format_response(state: AgentState) -> AgentState:
+    """Node: Generate final conversational reply."""
+    start_time = time.time()
+    _, _, _, _, formatter = _get_services()
+    
     ranked = state.get("ranked_results") or []
-    reply = await _formatter.format(
-        intent=state.get("intent"),
+    intent = state["intent"]
+    
+    reply = await formatter.format(
+        intent=intent,
         results=ranked,
-        clarification_needed=state.get("clarification_needed", False),
-        clarification_prompt=state.get("clarification_prompt"),
-        session=state["session"],
+        session=state["session"]
     )
+    
     state["reply"] = reply
-    state["results"] = [r.model_dump() for r in ranked]
+    
+    # Save to session
+    if state.get("session"):
+        state["session"].last_intent = intent
+        if ranked:
+            state["session"].last_results = ranked
+        state["session"].add_turn(
+            user_msg=state["user_message"],
+            reply=reply,
+            results_count=len(ranked)
+        )
 
-    # Update session memory
-    intent = state.get("intent")
-    if intent and not intent.needs_clarification:
-        state["session"].active_filters = intent
-        state["session"].last_results = ranked
-
-    state["session"].add_turn(
-        user_msg=state["user_message"],
-        reply=reply,
-        results_count=len(ranked),
-    )
+    total_latency = time.time() - state.get("start_time", start_time)
+    
+    logger.info(f"\nAI Response: {reply}")
+    logger.info(f"Search Duration: {total_latency:.2f}s")
+    logger.info("\n" + "="*40)
+    logger.info("SEARCH COMPLETE")
+    logger.info("="*40 + "\n")
+    
     return state
 
 
-# ── Node: handle_error ────────────────────────────────────────────────────────
-
 async def handle_error(state: AgentState) -> AgentState:
-    error = state.get("error", "unknown")
-    logger.warning("Agent error node reached", extra={"error": error})
-
-    messages = {
-        "intent_extraction_failed": (
-            "I didn't quite catch that. Could you rephrase? "
-            "For example: 'find my PDF reports from last month'."
-        ),
-        "drive_api_error": (
-            "I couldn't reach Google Drive right now. Please try again in a moment."
-        ),
-    }
-    state["reply"] = messages.get(error, "Something went wrong. Please try again.")
-    state["results"] = []
-    state["clarification_needed"] = False
+    """Node: Graceful error handling."""
+    state["reply"] = "I encountered an error while searching your Drive. Please try again later."
     return state

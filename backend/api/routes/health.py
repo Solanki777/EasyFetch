@@ -15,6 +15,7 @@ router = APIRouter()
 async def health(
     session_manager: SessionManager = Depends(get_session_manager),
 ) -> HealthResponse:
+    print("[BACKEND] Health check request received", flush=True)
     return HealthResponse(
         status="ok",
         version=settings.app_version,

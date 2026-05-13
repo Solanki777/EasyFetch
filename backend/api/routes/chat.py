@@ -39,16 +39,14 @@ async def chat(
     )
 
     try:
+        logger.info("="*30)
+        logger.info(f"CHAT ROUTE START: {payload.session_id}")
+        logger.info(f"Message: {payload.message}")
+        logger.info("="*30)
 
-        print(
-            f"--- Chat route triggered for session: {payload.session_id}",
-            flush=True
-        )
+        session = session_manager.get_or_create(payload.session_id)
 
-        session = session_manager.get_or_create(
-            payload.session_id
-        )
-
+        logger.info("--- Invoking Agent Graph ---")
         result = await _graph.ainvoke({
             "user_message": payload.message,
             "session": session,
@@ -56,76 +54,53 @@ async def chat(
             "clarification_prompt": None,
             "results": [],
         })
+        logger.info("--- Graph Execution Complete ---")
 
         # Persist updated session
-        session_manager.update(
-            payload.session_id,
-            result["session"]
-        )
+        if "session" in result:
+            session_manager.update(payload.session_id, result["session"])
 
         # Normalize results
         file_results = []
+        raw_results = result.get("results") or []
+        logger.info(f"--- Processing {len(raw_results)} results ---")
 
-        for r in (result.get("results") or []):
-
+        for r in raw_results:
             normalized = _normalise_file(r)
-
-            file_results.append(
-                FileResult(**normalized)
-            )
+            file_results.append(FileResult(**normalized))
 
         # Active filters
         active_filters = {}
-
         intent = result.get("intent")
-
         if intent:
             try:
-                active_filters = (
-                    intent.active_filter_summary()
-                )
+                active_filters = intent.active_filter_summary()
             except Exception:
                 active_filters = {}
 
         # Open file handling
         open_file = None
-
         if result.get("open_file"):
+            normalized_open = _normalise_file(result["open_file"])
+            open_file = FileResult(**normalized_open)
 
-            normalized_open = _normalise_file(
-                result["open_file"]
-            )
-
-            open_file = FileResult(
-                **normalized_open
-            )
+        logger.info("="*30)
+        logger.info(f"CHAT ROUTE SUCCESS: {payload.session_id}")
+        logger.info(f"Reply Preview: {(result.get('reply') or '')[:50]}...")
+        logger.info("="*30)
 
         return ChatResponse(
             session_id=payload.session_id,
-
-            reply=(
-                result.get("reply")
-                or "I couldn't process that request."
-            ),
-
+            reply=result.get("reply") or "I couldn't process that request.",
             results=file_results,
-
             active_filters=active_filters,
-
-            clarification_needed=result.get(
-                "clarification_needed",
-                False
-            ),
-
-            clarification_prompt=result.get(
-                "clarification_prompt"
-            ),
-
+            clarification_needed=result.get("clarification_needed", False),
+            clarification_prompt=result.get("clarification_prompt"),
             open_file=open_file,
         )
 
-    except Exception:
-
+    except Exception as e:
+        logger.error(f"!!! CHAT ROUTE ERROR: {str(e)} !!!")
         logger.exception(
             "Chat endpoint unhandled error",
             extra={
@@ -136,7 +111,7 @@ async def chat(
 
         raise HTTPException(
             status_code=500,
-            detail="Internal server error"
+            detail=f"Internal server error: {str(e)}"
         )
 
 

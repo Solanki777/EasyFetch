@@ -51,3 +51,8 @@ def setup_logging(level: int = logging.INFO) -> None:
     # Silence noisy third-party loggers
     for name in ("googleapiclient.discovery_cache", "urllib3.connectionpool", "openai", "httpx"):
         logging.getLogger(name).setLevel(logging.WARNING)
+
+
+def log_divider(section: str) -> None:
+    """Print a high-visibility divider for terminal observability."""
+    print(f"\n{'='*25}\n{section.upper():^25}\n{'='*25}\n", flush=True)

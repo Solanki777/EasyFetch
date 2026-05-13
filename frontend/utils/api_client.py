@@ -16,13 +16,25 @@ class APIClient:
 
     def chat(self, session_id: str, message: str) -> dict:
         """POST /api/v1/chat and return the parsed JSON response."""
-        with httpx.Client(timeout=TIMEOUT) as client:
-            resp = client.post(
-                f"{self._base}/api/v1/chat",
-                json={"session_id": session_id, "message": message},
-            )
-            resp.raise_for_status()
-            return resp.json()
+        url = f"{self._base}/api/v1/chat"
+        print(f"\n[FRONTEND] Sending chat request to: {url}", flush=True)
+        print(f"[FRONTEND] Session: {session_id}, Message: {message[:50]}...", flush=True)
+        
+        try:
+            with httpx.Client(timeout=TIMEOUT) as client:
+                resp = client.post(
+                    url,
+                    json={"session_id": session_id, "message": message},
+                )
+                print(f"[FRONTEND] Received response: {resp.status_code}", flush=True)
+                resp.raise_for_status()
+                return resp.json()
+        except httpx.HTTPStatusError as e:
+            print(f"[FRONTEND] HTTP Error: {e.response.status_code} - {e.response.text}", flush=True)
+            raise
+        except Exception as e:
+            print(f"[FRONTEND] Connection Error: {str(e)}", flush=True)
+            raise
 
     def get_session(self, session_id: str) -> dict | None:
         """GET /api/v1/session/{id}"""

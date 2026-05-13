@@ -1,3 +1,4 @@
+
 """
 LLM-powered intent extraction with production prompt engineering.
 """
@@ -7,8 +8,8 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_groq import ChatGroq
 
 from backend.config import settings
 from backend.schemas.intent import SearchIntent
@@ -20,25 +21,41 @@ logger = logging.getLogger(__name__)
 class IntentExtractor:
     """
     Extracts structured SearchIntent from user messages.
-    Uses Groq for high-speed, low-latency extraction.
     """
 
     def __init__(self):
+
         self._llm = ChatGroq(
             api_key=settings.groq_api_key,
             model_name=settings.llm_model,
             temperature=0,
             model_kwargs={
-                "response_format": {"type": "json_object"}
+                "response_format": {
+                    "type": "json_object"
+                }
             }
         )
 
         self._prompt = ChatPromptTemplate.from_messages([
-            ("system", self._get_system_prompt()),
-            ("user", "User message: {user_message}\n\nToday's date: {today}")
+
+            (
+                "system",
+                self._get_system_prompt()
+            ),
+
+            (
+                "user",
+                (
+                    "User message: {user_message}\n\n"
+                    "Today's date: {today}"
+                )
+            )
         ])
 
-        self._chain = self._prompt | self._llm
+        self._chain = (
+            self._prompt
+            | self._llm
+        )
 
     async def extract(
         self,
@@ -46,122 +63,182 @@ class IntentExtractor:
         session: SessionState
     ) -> SearchIntent | None:
         """
-        Extracts search intent with defensive validation and detailed logging.
+        Extract search intent from natural language.
         """
-        try:
-            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-            logger.debug(f"Extracting intent for message: '{user_message}'")
-            
-            # Debug info for session
+        try:
+
+            today = datetime.now(
+                timezone.utc
+            ).strftime("%Y-%m-%d")
+
+            logger.info(
+                f"Extracting intent: {user_message}"
+            )
+
             if session and session.history:
-                logger.debug(f"Conversation history depth: {len(session.history)}")
+
+                logger.debug(
+                    f"History size: "
+                    f"{len(session.history)}"
+                )
 
             resp = await self._chain.ainvoke({
                 "user_message": user_message,
                 "today": today
             })
 
-            # Defensive parsing
+            logger.debug(
+                f"Raw LLM output: {resp.content}"
+            )
+
             try:
-                data = json.loads(resp.content)
-            except json.JSONDecodeError as je:
-                logger.error(f"LLM returned invalid JSON: {resp.content}")
+
+                data = json.loads(
+                    resp.content
+                )
+
+            except json.JSONDecodeError:
+
+                logger.error(
+                    "Invalid JSON from LLM"
+                )
+
+                logger.error(resp.content)
+
                 return None
 
             # Preserve original query
             data["raw_query"] = user_message
 
-            # Log extracted data for debugging
-            logger.info("===== EXTRACTED INTENT =====")
-            logger.info(json.dumps(data, indent=2))
+            logger.info(
+                "===== EXTRACTED INTENT ====="
+            )
 
-            # Validate with Pydantic
+            logger.info(
+                json.dumps(
+                    data,
+                    indent=2
+                )
+            )
+
             try:
-                intent = SearchIntent(**data)
-                
-                # Debug specific logic results
-                if intent.mime_types:
-                    logger.debug(f"Detected MIME types: {intent.mime_types}")
-                if intent.filename_query:
-                    logger.debug(f"Filename query: '{intent.filename_query}'")
-                if intent.followup.is_followup:
-                    logger.debug(f"Follow-up detected: {intent.followup.action}")
-                
+
+                intent = SearchIntent(
+                    **data
+                )
+
+                # Safety fix:
+                # Never allow accidental fullText search
+                # unless explicitly requested.
+
+                explicit_content_terms = [
+                    "inside file",
+                    "inside files",
+                    "inside document",
+                    "inside documents",
+                    "search within",
+                    "within files",
+                    "content search",
+                    "text inside",
+                    "mentioned in",
+                    "containing text",
+                ]
+
+                lowered = user_message.lower()
+
+                explicit = any(
+                    t in lowered
+                    for t in explicit_content_terms
+                )
+
+                if not explicit:
+
+                    intent.search_in_content = False
+
+                    if (
+                        intent.fulltext_query
+                        and not explicit
+                    ):
+                        intent.fulltext_query = None
+
+                # Rich observability logging
+                import json as json_lib
+                logger.info("=" * 40)
+                logger.info("INTENT EXTRACTION COMPLETE")
+                logger.info(f"  Intent: {json_lib.dumps(intent.model_dump(), indent=2)}")
+                logger.info("=" * 40)
+
                 return intent
+
             except Exception as ve:
-                logger.error(f"Pydantic validation failed for LLM output: {ve}")
-                logger.error(f"Raw data: {data}")
+
+                logger.exception(
+                    "Pydantic validation failed"
+                )
+
+                logger.error(str(ve))
+
+                logger.error(data)
+
                 return None
 
         except Exception as e:
-            logger.exception(f"Unexpected error during intent extraction: {e}")
+
+            logger.exception(
+                f"Intent extraction failed: {e}"
+            )
+
             return None
 
     def _get_system_prompt(self) -> str:
+
         return """
-You are a precision structured-output extraction engine for a Google Drive search assistant.
-Your goal is to convert natural language queries into a structured 'SearchIntent' JSON object.
+You are a universal intelligent file search engine for Google Drive.
+Your goal is to extract structured search intent from natural language.
 
-### CORE RULES:
+Return ONLY valid JSON.
 
-1. **Output Format**: Return ONLY valid JSON matching the schema.
-2. **filename_query**: 
-   - Extract only specific keywords for file names.
-   - STRIP vague verbs and filler words: "show", "find", "search", "give", "list", "files", "documents", "stuff", "get", "me".
-   - If the user says "show all files" or "list everything", set filename_query to null.
-3. **MIME Type Detection**:
-   - PDFs -> ["application/pdf"]
-   - Images -> ["image/jpeg", "image/png", "image/gif", "image/svg+xml", "image/webp"]
-   - Folders/Directories -> ["application/vnd.google-apps.folder"]
-   - Spreadsheets (Excel/CSV/Sheets) -> ["application/vnd.google-apps.spreadsheet", "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "text/csv"]
-   - Docs (Word/Google Docs) -> ["application/vnd.google-apps.document", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
-   - Presentations (PPT/Slides) -> ["application/vnd.google-apps.presentation", "application/vnd.ms-powerpoint", "application/vnd.openxmlformats-officedocument.presentationml.presentation"]
-   - Archives (Zip/Tar) -> ["application/zip", "application/x-tar"]
-4. **FullText Search**:
-   - Detect phrases like "containing", "contains", "mentioning", "talking about", "inside".
-   - Set search_in_content = true and populate fulltext_query.
-5. **Date Filters**:
-   - Resolve relative dates using today's date.
-   - Values: "today", "yesterday", "this_week", "last_week", "this_month", "last_month", "this_year".
-6. **Sorting**:
-   - "latest", "newest", "recent", "newly uploaded" -> set sort.field = "createdTime" or "modifiedTime" and sort.direction = "desc".
-7. **Follow-ups**:
-   - Detect if the message is a refinement of a previous search (e.g., "now only PDFs", "from last week").
-   - Set followup.is_followup = true and appropriate action.
-8. **Ambiguity**:
-   - If the query is too vague (e.g., "find stuff"), set ambiguity.needs_clarification = true.
+━━━━━━━━━━━━━━━━━━━━
+1. UNIVERSAL CATEGORIES (mime_types)
+━━━━━━━━━━━━━━━━━━━━
+Map natural language terms to these categories or specific MIME types:
+- "images", "photos", "pictures" -> CATEGORY: images
+- "spreadsheets", "excel", "sheets", "csv" -> CATEGORY: spreadsheets
+- "documents", "word", "docs", "pdfs" -> CATEGORY: documents
+- "presentations", "slides", "powerpoint" -> CATEGORY: presentations
+- "archives", "zip", "rar", "7z" -> CATEGORY: archives
+- "code", "scripts", "python", "javascript", "json" -> CATEGORY: code
+- "video", "movies", "mp4", "mov" -> CATEGORY: video
+- "audio", "music", "mp3" -> CATEGORY: audio
+- "folders" -> application/vnd.google-apps.folder
 
-### SCHEMA STRUCTURE:
-{{
-  "filename_query": string | null,
-  "fulltext_query": string | null,
-  "search_in_content": boolean,
-  "mime_types": string[],
-  "file_extensions": string[],
-  "date_filter": {{
-    "relative": "today" | "yesterday" | "this_week" | "last_week" | "this_month" | "last_month" | "this_year" | null,
-    "field": "modifiedTime" | "createdTime"
-  }} | null,
-  "sort": {{
-    "field": "modifiedTime" | "createdTime" | "name" | "relevance",
-    "direction": "asc" | "desc"
-  }},
-  "followup": {{
-    "is_followup": boolean,
-    "action": string | null
-  }},
-  "ambiguity": {{
-    "needs_clarification": boolean,
-    "clarification_question": string | null
-  }}
-}}
+━━━━━━━━━━━━━━━━━━━━
+2. SMART FILENAME QUERY (filename_query)
+━━━━━━━━━━━━━━━━━━━━
+- Extract the core subject.
+- STRIP extension words if you already set the MIME/Extension filter. 
+  Example: "find sekiro.jpg" -> filename_query: "sekiro", file_extensions: ["jpg"]
+- STRIP category words. 
+  Example: "show me project images" -> filename_query: "project", mime_types: ["image/jpeg", "image/png"...]
+- REMOVE fillers: "show", "find", "get", "me", "list", "files", "stuff".
 
-### EXAMPLES:
+━━━━━━━━━━━━━━━━━━━━
+3. CONTENT SEARCH (search_in_content)
+━━━━━━━━━━━━━━━━━━━━
+- ONLY true if user says: "inside", "content", "mentioned in", "text within".
+- Otherwise FALSE (default).
 
-- "show pdf files" -> {{ "filename_query": null, "mime_types": ["application/pdf"] }}
-- "find spreadsheets about revenue" -> {{ "filename_query": "revenue", "mime_types": ["application/vnd.google-apps.spreadsheet", ...], "followup": {{"is_followup": false}} }}
-- "latest uploaded images" -> {{ "mime_types": ["image/jpeg", ...], "sort": {{"field": "createdTime", "direction": "desc"}} }}
-- "files containing budget" -> {{ "search_in_content": true, "fulltext_query": "budget" }}
+━━━━━━━━━━━━━━━━━━━━
+4. DATE FILTERS (date_filter)
+━━━━━━━━━━━━━━━━━━━━
+- today, yesterday, this_week, last_week, this_month, last_month, this_year.
+
+━━━━━━━━━━━━━━━━━━━━
+5. FOLLOW-UP & AMBIGUITY
+━━━━━━━━━━━━━━━━━━━━
+- followup.is_followup: true if this refines previous results.
+- ambiguity.needs_clarification: true if query is empty or nonsense.
+
+Return ONLY valid JSON.
 """
-
