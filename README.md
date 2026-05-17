@@ -251,15 +251,6 @@ The entire pipeline is built on **Pydantic v2**. This ensures that every piece o
 
 ---
 
-## 🗺️ Future Roadmap
-
-- [ ] **Vector Search (RAG)**: Implement semantic search within document content using embeddings.
-- [ ] **OCR Integration**: Enable searching inside images and scanned PDFs.
-- [ ] **Redis Backend**: Persistent, scalable session management for production clusters.
-- [ ] **Streaming Responses**: Token-by-token conversational UI for lower perceived latency.
-- [ ] **Multi-Cloud Support**: Expand discovery to OneDrive and Dropbox.
-
----
 
 ## 📄 License
 
